@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Brylas Super Bros</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { width:100vw; height:100vh; overflow:hidden; background:#000; touch-action:none; }
+  canvas { display:block; width:100%; height:100%; }
+  #ui {
+    position:absolute; top:14px; left:14px; color:#FFD700;
+    font:bold 20px Georgia,serif; z-index:100;
+    text-shadow: 0 0 10px rgba(255,215,0,.9), 2px 2px 0 #000;
+    letter-spacing:1px;
+  }
+  #controls {
+    position:absolute; bottom:22px; width:100%;
+    display:flex; justify-content:space-around; z-index:100;
+    pointer-events:none;
+  }
+  .btn {
+    width:72px; height:72px; border-radius:50%;
+    background:rgba(0,0,0,.55); border:3px solid rgba(255,215,0,.75);
+    font-size:26px; color:#FFD700; display:flex;
+    align-items:center; justify-content:center; font-weight:bold;
+    pointer-events:all; user-select:none; -webkit-user-select:none;
+    box-shadow:0 0 14px rgba(255,215,0,.35);
+  }
+  .btn:active { transform:scale(.88); background:rgba(255,215,0,.22); }
+</style>
+</head>
+<body>
+<div id="ui">Score: <span id="score">0</span> &nbsp;|&nbsp; Lives: <span id="lives">3</span></div>
+<canvas id="gc"></canvas>
+<div id="controls">
+  <button class="btn" id="btnL">◀</button>
+  <button class="btn" id="btnJ">▲</button>
+  <button class="btn" id="btnR">▶</button>
+</div>
+<script>
+// ─────────────────────────────────────────────
+//  CANVAS SETUP
+// ─────────────────────────────────────────────
+const canvas = document.getElementById('gc');
+const ctx    = canvas.getContext('2d');
+function resize(){
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ─────────────────────────────────────────────
+//  STATE
+// ─────────────────────────────────────────────
+let score=0, lives=3, gameX=0, gameOver=false;
+const keys = { L:false, R:false, U:false };
+let jumpConsumed = false;
+
+// ─────────────────────────────────────────────
+//  INPUT
+// ─────────────────────────────────────────────
+[['btnL','L'],['btnR','R'],['btnJ','U']].forEach(([id,k])=>{
+  const b = document.getElementById(id);
+  b.addEventListener('touchstart', e=>{ e.preventDefault(); keys[k]=true;  },{passive:false});
+  b.addEventListener('touchend',   e=>{ e.preventDefault(); keys[k]=false; },{passive:false});
+  b.addEventListener('mousedown', ()=> keys[k]=true);
+  b.addEventListener('mouseup',   ()=> keys[k]=false);
+});
+document.addEventListener('keydown', e=>{
+  if(e.key==='ArrowLeft' ||e.key==='a') keys.L=true;
+  if(e.key==='ArrowRight'||e.key==='d') keys.R=true;
+  if((e.key===' '||e.key==='ArrowUp')&&!e.repeat) keys.U=true;
+  if(gameOver&&e.key===' ') restartGame();
+});
+document.addEventListener('keyup', e=>{
+  if(e.key==='ArrowLeft' ||e.key==='a') keys.L=false;
+  if(e.key==='ArrowRight'||e.key==='d') keys.R=false;
+  if(e.key===' '||e.key==='ArrowUp'){ keys.U=false; jumpConsumed=false; }
+});
+canvas.addEventListener('touchstart',()=>{ if(gameOver) restartGame(); });
+
+// ─────────────────────────────────────────────
+//  DRAW LOGO  (tarcza BRYLAS$)
+//  cx,cy = centrum na ekranie (już przesunięte przez parallax)
+// ─────────────────────────────────────────────
+function drawShield(cx, cy, sc, alpha){
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(cx, cy);
+  ctx.scale(sc, sc);
+
+  // cień zewnętrzny
+  ctx.shadowColor='rgba(0,80,255,.5)'; ctx.shadowBlur=50;
+
+  // białe tło tarczy
+  ctx.fillStyle='#cdd4de';
+  ctx.beginPath();
+  ctx.moveTo(  0,-135); ctx.lineTo( 98,-135);
+  ctx.lineTo( 98,  38); ctx.lineTo(  0, 135);
+  ctx.lineTo(-98,  38); ctx.lineTo(-98,-135);
+  ctx.closePath(); ctx.fill();
+
+  // czarna lewa część
+  ctx.fillStyle='#0c0c0c';
+  ctx.beginPath();
+  ctx.moveTo(-98,-135); ctx.lineTo( 10,-135);
+  ctx.lineTo( 10,  28); ctx.lineTo(-98,  38);
+  ctx.closePath(); ctx.fill();
+
+  // niebieska prawa część
+  ctx.fillStyle='#1560be';
+  ctx.beginPath();
+  ctx.moveTo(10,-135); ctx.lineTo(98,-135);
+  ctx.lineTo(98,  38); ctx.lineTo(10,  28);
+  ctx.closePath(); ctx.fill();
+
+  // kontur
+  ctx.shadowBlur=0;
+  ctx.strokeStyle='rgba(255,255,255,.92)'; ctx.lineWidth=5;
+  ctx.beginPath();
+  ctx.moveTo(  0,-135); ctx.lineTo( 98,-135);
+  ctx.lineTo( 98,  38); ctx.lineTo(  0, 135);
+  ctx.lineTo(-98,  38); ctx.lineTo(-98,-135);
+  ctx.closePath(); ctx.stroke();
+
+  // wewnętrzna linia podziału
+  ctx.strokeStyle='rgba(255,255,255,.3)'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(10,-135); ctx.lineTo(10,38); ctx.stroke();
+
+  // tekst BRYLAS$
+  ctx.shadowColor='#000'; ctx.shadowBlur=18;
+  ctx.fillStyle='#FFD700';
+  ctx.font='bold 56px Georgia,serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('BRYLAS$', 0, 8);
+
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────
+//  BACKGROUND  — logo podąża za gameX (parallax ~30%)
+// ─────────────────────────────────────────────
+function drawBackground(){
+  // gradient nieba
+  const g = ctx.createLinearGradient(0,0,0,canvas.height);
+  g.addColorStop(0,'#050510');
+  g.addColorStop(1,'#0d1228');
+  ctx.fillStyle=g; ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // logo — stałe centrum ekranu z niewielkim parallaxem
+  // Przesuwa się tylko o 30% gameX → zostaje "prawie w centrum"
+  const logoX = canvas.width/2  - gameX * 0.3 + canvas.width*0.3*0; 
+  // uproszczone: środek ekranu minus lekki parallax (logo nie ucieka z ekranu)
+  const clampedX = Math.max(canvas.width*0.25, Math.min(canvas.width*0.75, canvas.width/2 - gameX*0.08));
+  drawShield(clampedX, canvas.height/2 - 20, 1.75, 0.13);
+
+  // chmury z parallaxem 20%
+  const t = Date.now()*0.00008;
+  ctx.fillStyle='rgba(255,255,255,0.025)';
+  for(let i=0;i<7;i++){
+    const bx = ((i*220 - gameX*0.2 + t*120*(i%3+1)) % (canvas.width+400) + canvas.width+400) % (canvas.width+400) - 200;
+    const by = 50 + i*25;
+    const br = 30 + i*9;
+    ctx.beginPath(); ctx.arc(bx,     by, br,      0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(bx+55,  by, br*.65,  0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(bx-55,  by, br*.55,  0,Math.PI*2); ctx.fill();
+  }
+
+  // drobne gwiazdy (statyczne relative do ekranu)
+  ctx.fillStyle='rgba(255,255,255,0.5)';
+  for(let i=0;i<40;i++){
+    const sx = (i*137.5)%canvas.width;
+    const sy = (i*97.3) %( canvas.height*0.55);
+    ctx.fillRect(sx,sy,1,1);
+  }
+}
+
+// ─────────────────────────────────────────────
+//  BRYLAS — postać na podstawie zdjęcia
+//  Czarny garnitur, czerwony krawat, ciemne okulary,
+//  białe Adidasy z czerwonymi paskami, broda
+// ─────────────────────────────────────────────
+class Brylas {
+  constructor(){ this.w=62; this.h=90; this.reset(); }
+  reset(){
+    // Spawnuj DOKŁADNIE na pierwszej platformie
+    // Platforma startowa: y = gh-170, więc gracz: y = gh-170 - h
+    this.x = 80;
+    this.y = canvas.height - 170 - this.h; // na platformie!
+    this.vx=0; this.vy=0;
+    this.grounded=true; // już stoi!
+    jumpConsumed=false;
+    this.facing=1; // 1=prawo, -1=lewo
+    this.walkAnim=0;
+  }
+  update(){
+    this.vx=0;
+    if(keys.L){ this.vx=-5; this.facing=-1; }
+    if(keys.R){ this.vx= 5; this.facing= 1; }
+    if(this.vx!==0) this.walkAnim+=0.2; else this.walkAnim=0;
+
+    if(keys.U && this.grounded && !jumpConsumed){
+      this.vy=-15; this.grounded=false; jumpConsumed=true;
+    }
+    if(!keys.U) jumpConsumed=false;
+
+    this.vy = Math.min(this.vy+0.6, 20);
+    this.x += this.vx;
+    this.y += this.vy;
+
+    // kamera
+    gameX = Math.max(0, this.x - canvas.width*0.28);
+    this.grounded=false;
+    if(this.y > canvas.height+200) this.die();
+  }
+
+  draw(){
+    const sx = this.x - gameX;
+    const legSwing = Math.sin(this.walkAnim)*8;
+    ctx.save();
+    ctx.translate(sx + this.w/2, this.y + this.h/2);
+    ctx.scale(this.facing, 1);
+
+    const W=this.w, H=this.h;
+    // W=62, H=90 → wszystko relative do środka (0,0)
+
+    // ── BUTY Adidas (białe z czerwonymi paskami) ──
+    // lewy but
+    ctx.fillStyle='#f0f0f0';
+    ctx.beginPath(); ctx.roundRect(-W/2+2, H/2-14, 26, 15, [3,3,7,7]); ctx.fill();
+    ctx.fillStyle='#cc0000';
+    for(let s=0;s<3;s++){
+      ctx.fillRect(-W/2+6+s*5, H/2-12, 2, 10);
+    }
+    ctx.fillStyle='#ddd'; ctx.fillRect(-W/2+2, H/2+1, 26, 3); // podeszwa
+
+    // prawy but
+    ctx.fillStyle='#f0f0f0';
+    ctx.beginPath(); ctx.roundRect(W/2-28, H/2-14+legSwing*0.3, 26, 15, [3,3,7,7]); ctx.fill();
+    ctx.fillStyle='#cc0000';
+    for(let s=0;s<3;s++){
+      ctx.fillRect(W/2-24+s*5, H/2-12+legSwing*0.3, 2, 10);
+    }
+    ctx.fillStyle='#ddd'; ctx.fillRect(W/2-28, H/2+1+legSwing*0.3, 26, 3);
+
+    // ── SPODNIE (granatowe) ──
+    ctx.fillStyle='#1a2040';
+    ctx.fillRect(-W/2+4, H/2-40, W-8, 28);
+    // szew spodni
+    ctx.strokeStyle='#131830'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(0,H/2-40); ctx.lineTo(0,H/2-14); ctx.stroke();
+    // prawa nogawka lekko odchylona
+    ctx.fillStyle='#1a2040';
+    ctx.fillRect(2, H/2-38, W/2-6, 24);
+
+    // ── MARYNARKA (czarna) ──
+    // tułów
+    ctx.fillStyle='#0d0d0d';
+    ctx.beginPath(); ctx.roundRect(-W/2+2, -H/2+38, W-4, 42, [4,4,0,0]); ctx.fill();
+
+    // klapy marynarki (trójkąty jaśniejsze)
+    ctx.fillStyle='#1a1a1a';
+    ctx.beginPath();
+    ctx.moveTo(-4,-H/2+38); ctx.lineTo(-W/2+6,-H/2+44); ctx.lineTo(-W/2+6,-H/2+62); ctx.lineTo(-4,-H/2+54); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo( 4,-H/2+38); ctx.lineTo( W/2-6,-H/2+44); ctx.lineTo( W/2-6,-H/2+62); ctx.lineTo( 4,-H/2+54); ctx.fill();
+
+    // ── KRAWAT (czerwony) ──
+    ctx.fillStyle='#cc0000';
+    ctx.beginPath();
+    ctx.moveTo(-5,-H/2+38); ctx.lineTo(5,-H/2+38);
+    ctx.lineTo(7,-H/2+66); ctx.lineTo(0,-H/2+72); ctx.lineTo(-7,-H/2+66);
+    ctx.closePath(); ctx.fill();
+    // węzeł krawata
+    ctx.fillStyle='#a80000';
+    ctx.beginPath(); ctx.ellipse(0,-H/2+40,6,5,0,0,Math.PI*2); ctx.fill();
+
+    // guzik marynarki
+    ctx.fillStyle='#333';
+    ctx.beginPath(); ctx.arc(0,-H/2+70,3,0,Math.PI*2); ctx.fill();
+
+    // ── SZYJA ──
+    ctx.fillStyle='#d4a060';
+    ctx.fillRect(-7,-H/2+30,14,12);
+
+    // ── GŁOWA ──
+    ctx.fillStyle='#d4a060';
+    ctx.beginPath(); ctx.roundRect(-W/2+8,-H/2-2, W-16, 36, 10); ctx.fill();
+    // uszy
+    ctx.fillStyle='#c08850';
+    ctx.beginPath(); ctx.ellipse(-W/2+10,-H/2+16,5,7,0,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse( W/2-10,-H/2+16,5,7,0,0,Math.PI*2); ctx.fill();
+
+    // ── WŁOSY (krótkie, czarne) ──
+    ctx.fillStyle='#111';
+    ctx.beginPath(); ctx.roundRect(-W/2+7,-H/2-4,W-14,16,[10,10,3,3]); ctx.fill();
+    // boki
+    ctx.fillRect(-W/2+7,-H/2+8,8,10);
+    ctx.fillRect( W/2-15,-H/2+8,8,10);
+
+    // ── BRWI ──
+    ctx.fillStyle='#111';
+    ctx.fillRect(-W/2+12,-H/2+14,13,3);
+    ctx.fillRect( W/2-25,-H/2+14,13,3);
+
+    // ── NOS ──
+    ctx.fillStyle='#b8885a';
+    ctx.beginPath(); ctx.ellipse(0,-H/2+22,4,3.5,0,0,Math.PI*2); ctx.fill();
+
+    // ── USTA (linia) ──
+    ctx.strokeStyle='#8a5a30'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(-6,-H/2+28); ctx.lineTo(6,-H/2+28); ctx.stroke();
+
+    // ── BRODA (gęsta, krótka) ──
+    ctx.fillStyle='#222';
+    ctx.beginPath(); ctx.roundRect(-W/2+12,-H/2+26,W-24,10,[0,0,6,6]); ctx.fill();
+    // wąsy
+    ctx.fillStyle='#1a1a1a';
+    ctx.fillRect(-W/2+12,-H/2+24,10,3);
+    ctx.fillRect( W/2-22,-H/2+24,10,3);
+
+    // ── OKULARY PRZECIWSŁONECZNE (czarne, grube oprawki) ──
+    const gy = -H/2+17;
+    // szkła — bardzo ciemne
+    ctx.fillStyle='#050505';
+    ctx.beginPath(); ctx.roundRect(-W/2+8, gy-5, 20, 12, 5); ctx.fill();
+    ctx.beginPath(); ctx.roundRect( W/2-28,gy-5, 20, 12, 5); ctx.fill();
+    // odblask
+    ctx.fillStyle='rgba(255,255,255,0.12)';
+    ctx.beginPath(); ctx.roundRect(-W/2+10,gy-4, 7, 5, 2); ctx.fill();
+    ctx.beginPath(); ctx.roundRect( W/2-26,gy-4, 7, 5, 2); ctx.fill();
+    // oprawki — czarne (grube jak na zdjęciu)
+    ctx.strokeStyle='#111'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.roundRect(-W/2+8, gy-5, 20, 12, 5); ctx.stroke();
+    ctx.beginPath(); ctx.roundRect( W/2-28,gy-5, 20, 12, 5); ctx.stroke();
+    // mostek
+    ctx.lineWidth=2.5;
+    ctx.beginPath(); ctx.moveTo(-W/2+28,gy+1); ctx.lineTo(W/2-28,gy+1); ctx.stroke();
+    // zauszniki
+    ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(-W/2+8,gy+1); ctx.lineTo(-W/2+2,gy+4); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo( W/2-8,gy+1); ctx.lineTo( W/2-2,gy+4); ctx.stroke();
+
+    ctx.restore();
+  }
+
+  die(){
+    lives--;
+    document.getElementById('lives').innerText=lives;
+    if(lives>0){ this.reset(); gameX=0; }
+    else gameOver=true;
+  }
+}
+
+// ─────────────────────────────────────────────
+//  PLATFORMY
+// ─────────────────────────────────────────────
+class Platform {
+  constructor(x,y,w,h=30){ this.x=x; this.y=y; this.w=w; this.h=h; }
+  draw(){
+    const sx=this.x-gameX;
+    // cień
+    ctx.fillStyle='rgba(0,0,0,.4)';
+    ctx.fillRect(sx+6,this.y+8,this.w,this.h);
+    // trawa
+    ctx.fillStyle='#25913a';
+    ctx.fillRect(sx,this.y,this.w,12);
+    // ziemia
+    ctx.fillStyle='#7a4a28';
+    ctx.fillRect(sx,this.y+12,this.w,this.h-12);
+    // cegły
+    ctx.fillStyle='#5e3318';
+    for(let i=0;i<this.w;i+=40) ctx.fillRect(sx+i,this.y+12,2,this.h-12);
+    // złoty kontur (motyw Brylas$)
+    ctx.strokeStyle='rgba(255,215,0,.35)'; ctx.lineWidth=1.5;
+    ctx.strokeRect(sx,this.y,this.w,this.h);
+    // blask górny krawędź
+    ctx.strokeStyle='rgba(255,255,255,.15)'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(sx,this.y+1); ctx.lineTo(sx+this.w,this.y+1); ctx.stroke();
+  }
+  collide(obj){
+    // Sprawdź czy obiekt jest w zakresie X platformy
+    if(obj.x+obj.w-8 <= this.x || obj.x+8 >= this.x+this.w) return;
+    const bottom     = obj.y+obj.h;
+    const prevBottom = bottom - obj.vy; // pozycja PRZED tym krokiem
+    // Lądowanie z góry
+    if(obj.vy>=0 && prevBottom <= this.y+4 && bottom >= this.y){
+      obj.y        = this.y - obj.h;
+      obj.vy       = 0;
+      obj.grounded = true;
+    }
+  }
+}
+
+// ─────────────────────────────────────────────
+//  KOTY — przeciwnicy (mrugające oczy, ogon)
+// ─────────────────────────────────────────────
+class Koty {
+  constructor(x,y){
+    this.x=x; this.y=y; this.w=50; this.h=40;
+    this.startX=x; this.dir=1; this.alive=true;
+    this.anim=Math.random()*Math.PI*2;
+  }
+  update(){
+    this.anim+=0.07;
+    this.x+=this.dir*1.8;
+    if(this.x>this.startX+140) this.dir=-1;
+    if(this.x<this.startX-140) this.dir= 1;
+  }
+  draw(){
+    if(!this.alive) return;
+    const sx=this.x-gameX;
+    ctx.save();
+    ctx.translate(sx+this.w/2, this.y+this.h/2);
+    if(this.dir===-1) ctx.scale(-1,1);
+
+    // ciało
+    ctx.fillStyle='#e07520';
+    ctx.beginPath(); ctx.ellipse(0,6,21,15,0,0,Math.PI*2); ctx.fill();
+    // paski
+    ctx.strokeStyle='#b05000'; ctx.lineWidth=1.8;
+    [-8,0,8].forEach(dx=>{ ctx.beginPath(); ctx.moveTo(dx,-4); ctx.lineTo(dx,18); ctx.stroke(); });
+
+    // głowa
+    ctx.fillStyle='#e07520';
+    ctx.beginPath(); ctx.arc(0,-10,14,0,Math.PI*2); ctx.fill();
+
+    // uszy
+    [[-9,-22],[9,-22]].forEach(([ex,ey])=>{
+      ctx.fillStyle='#e07520';
+      ctx.beginPath(); ctx.moveTo(ex-5,ey+7); ctx.lineTo(ex,ey-9); ctx.lineTo(ex+5,ey+7); ctx.fill();
+      ctx.fillStyle='#FFB6C1';
+      ctx.beginPath(); ctx.moveTo(ex-3,ey+5); ctx.lineTo(ex,ey-5); ctx.lineTo(ex+3,ey+5); ctx.fill();
+    });
+
+    // oczy
+    const blink = Math.sin(this.anim*.22)>.93;
+    if(!blink){
+      ctx.fillStyle='#FFD700';
+      ctx.beginPath(); ctx.ellipse(-5,-12,4,4,0,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse( 5,-12,4,4,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#111';
+      ctx.beginPath(); ctx.ellipse(-5,-12,2,3,0,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse( 5,-12,2,3,0,0,Math.PI*2); ctx.fill();
+    } else {
+      ctx.strokeStyle='#FFD700'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(-8,-12); ctx.lineTo(-2,-12); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo( 2,-12); ctx.lineTo( 8,-12); ctx.stroke();
+    }
+
+    // nos
+    ctx.fillStyle='#FFB6C1';
+    ctx.beginPath(); ctx.arc(0,-7,2.5,0,Math.PI*2); ctx.fill();
+
+    // wąsy
+    ctx.strokeStyle='rgba(255,255,255,.75)'; ctx.lineWidth=1.2;
+    [-1,1].forEach(s=>{
+      [-3,0,3].forEach(dy=>{
+        ctx.beginPath(); ctx.moveTo(s*2,-7+dy*.3); ctx.lineTo(s*15,-7+dy*.5); ctx.stroke();
+      });
+    });
+
+    // ogon animowany
+    const tw=Math.sin(this.anim)*15;
+    ctx.strokeStyle='#c05000'; ctx.lineWidth=4;
+    ctx.beginPath(); ctx.moveTo(19,5); ctx.quadraticCurveTo(30+tw*.5,22,24,36+tw*.4); ctx.stroke();
+
+    ctx.restore();
+  }
+}
+
+// ─────────────────────────────────────────────
+//  MONETY ($)
+// ─────────────────────────────────────────────
+class Coin {
+  constructor(x,y){ this.x=x; this.y=y; this.r=13; this.taken=false; this.anim=Math.random()*Math.PI*2; }
+  draw(){
+    if(this.taken) return;
+    this.anim+=0.04;
+    const sx=this.x-gameX;
+    const bob=Math.sin(this.anim)*5;
+    ctx.save();
+    ctx.shadowColor='#FFD700'; ctx.shadowBlur=16;
+    ctx.fillStyle='#FFD700';
+    ctx.beginPath(); ctx.arc(sx,this.y+bob,this.r,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='#9a6500'; ctx.lineWidth=2; ctx.stroke();
+    ctx.shadowBlur=0;
+    ctx.fillStyle='#5a3a00';
+    ctx.font=`bold ${this.r+1}px Georgia,serif`;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('$',sx,this.y+bob+1);
+    ctx.restore();
+  }
+}
+
+// ─────────────────────────────────────────────
+//  PARTIKLE efekt zbierania monety
+// ─────────────────────────────────────────────
+const particles=[];
+function spawnParticles(x,y,color){
+  for(let i=0;i<10;i++){
+    const angle=Math.random()*Math.PI*2;
+    const speed=2+Math.random()*3;
+    particles.push({ x, y, vx:Math.cos(angle)*speed, vy:Math.sin(angle)*speed-2, life:1, color });
+  }
+}
+function updateParticles(){
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];
+    p.x+=p.vx; p.y+=p.vy; p.vy+=0.12; p.life-=0.04;
+    if(p.life<=0) particles.splice(i,1);
+  }
+}
+function drawParticles(){
+  particles.forEach(p=>{
+    ctx.save(); ctx.globalAlpha=p.life;
+    ctx.fillStyle=p.color;
+    ctx.beginPath(); ctx.arc(p.x-gameX,p.y,4,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  });
+}
+
+// ─────────────────────────────────────────────
+//  BUILD LEVEL — platformy na podstawie canvas.height
+// ─────────────────────────────────────────────
+function buildLevel(){
+  const gh=canvas.height;
+  return {
+    platforms:[
+      new Platform(  0, gh-170, 560, 32),   // STARTOWA — gracz tu stoi
+      new Platform(620, gh-225, 170, 28),
+      new Platform(870, gh-290, 210, 28),
+      new Platform(1160,gh-248, 180, 28),
+      new Platform(1420,gh-170, 580, 32),
+      new Platform(2080,gh-238, 160, 28),
+      new Platform(2310,gh-310, 200, 28),
+      new Platform(2590,gh-260, 170, 28),
+    ],
+    koty:[
+      new Koty(440,  gh-208),
+      new Koty(900,  gh-328),
+      new Koty(1200, gh-286),
+      new Koty(1550, gh-208),
+      new Koty(2120, gh-276),
+    ],
+    coins:[
+      new Coin(660,  gh-265),
+      new Coin(910,  gh-330),
+      new Coin(1180, gh-288),
+      new Coin(1480, gh-210),
+      new Coin(1560, gh-210),
+      new Coin(2100, gh-278),
+      new Coin(2340, gh-350),
+    ]
+  };
+}
+
+let level  = buildLevel();
+let brylas = new Brylas();
+
+// ─────────────────────────────────────────────
+//  GAME OVER SCREEN
+// ─────────────────────────────────────────────
+function drawGameOver(){
+  ctx.save();
+  ctx.fillStyle='rgba(0,0,0,.82)';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  // logo duże na środku
+  drawShield(canvas.width/2, canvas.height/2-70, 1.4, 0.75);
+  ctx.fillStyle='#FFD700'; ctx.font='bold 48px Georgia,serif';
+  ctx.textAlign='center'; ctx.shadowColor='#FFD700'; ctx.shadowBlur=28;
+  ctx.fillText('GAME OVER', canvas.width/2, canvas.height/2+95);
+  ctx.shadowBlur=0; ctx.fillStyle='#eee'; ctx.font='24px Georgia,serif';
+  ctx.fillText('Score: '+score, canvas.width/2, canvas.height/2+135);
+  ctx.fillStyle='rgba(255,215,0,.6)'; ctx.font='17px Georgia,serif';
+  ctx.fillText('Spacja / dotknij ekranu — zagraj ponownie', canvas.width/2, canvas.height/2+172);
+  ctx.restore();
+}
+
+function restartGame(){
+  score=0; lives=3; gameOver=false; gameX=0;
+  particles.length=0;
+  document.getElementById('score').innerText=0;
+  document.getElementById('lives').innerText=3;
+  level  = buildLevel();
+  brylas = new Brylas();
+}
+
+// ─────────────────────────────────────────────
+//  UPDATE
+// ─────────────────────────────────────────────
+function update(){
+  brylas.update();
+  level.platforms.forEach(p=>p.collide(brylas));
+  updateParticles();
+
+  level.koty.forEach(k=>{
+    k.update();
+    if(!k.alive) return;
+    const hit =
+      brylas.x+brylas.w-8>k.x && brylas.x+8<k.x+k.w &&
+      brylas.y+brylas.h>k.y   && brylas.y<k.y+k.h;
+    if(hit){
+      if(brylas.vy>2){
+        k.alive=false; score+=100; brylas.vy=-12;
+        spawnParticles(k.x+k.w/2, k.y, '#FF8C00');
+        document.getElementById('score').innerText=score;
+      } else brylas.die();
+    }
+  });
+
+  level.coins.forEach(c=>{
+    if(c.taken) return;
+    const dx=brylas.x+brylas.w/2-c.x;
+    const dy=brylas.y+brylas.h/2-c.y;
+    if(Math.hypot(dx,dy)<c.r+20){
+      c.taken=true; score+=50;
+      spawnParticles(c.x,c.y,'#FFD700');
+      document.getElementById('score').innerText=score;
+    }
+  });
+}
+
+// ─────────────────────────────────────────────
+//  DRAW
+// ─────────────────────────────────────────────
+function draw(){
+  drawBackground();
+  level.platforms.forEach(p=>p.draw());
+  level.coins.forEach(c=>c.draw());
+  drawParticles();
+  level.koty.forEach(k=>k.draw());
+  brylas.draw();
+  if(gameOver) drawGameOver();
+}
+
+// ─────────────────────────────────────────────
+//  MAIN LOOP
+// ─────────────────────────────────────────────
+function gameLoop(){
+  if(!gameOver) update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+gameLoop();
+</script>
+</body>
+</html>
